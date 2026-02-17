@@ -27,13 +27,17 @@ function unauthorized(res) {
 }
 
 function requireAuth(req, res) {
+  // Prefer a dedicated header so edge Basic Auth can still use Authorization.
+  const x = String(req.headers['x-proxy-token'] || '');
+  if (x && x === PROXY_TOKEN) return true;
+
+  // Back-compat: allow Bearer token too.
   const hdr = req.headers['authorization'] || '';
   const m = /^Bearer\s+(.+)$/i.exec(String(hdr));
-  if (!m || m[1] !== PROXY_TOKEN) {
-    unauthorized(res);
-    return false;
-  }
-  return true;
+  if (m && m[1] === PROXY_TOKEN) return true;
+
+  unauthorized(res);
+  return false;
 }
 
 function uuid() {

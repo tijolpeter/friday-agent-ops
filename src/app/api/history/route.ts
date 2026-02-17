@@ -18,8 +18,15 @@ export async function GET(req: Request) {
     return NextResponse.json({ error: 'missing sessionKey' }, { status: 400 });
   }
 
+  const basicUser = process.env.PROXY_BASIC_AUTH_USER;
+  const basicPass = process.env.PROXY_BASIC_AUTH_PASS;
+  const basic = basicUser && basicPass ? Buffer.from(`${basicUser}:${basicPass}`).toString('base64') : null;
+
   const res = await fetch(`${base}/history?sessionKey=${encodeURIComponent(sessionKey)}`, {
-    headers: { authorization: `Bearer ${token}` },
+    headers: {
+      ...(basic ? { authorization: `Basic ${basic}` } : {}),
+      'x-proxy-token': token,
+    },
     cache: 'no-store',
   });
 
