@@ -20,8 +20,26 @@ export default function DashboardPage() {
   const [selectedSession, setSelectedSession] = useState<string>('');
   const [history, setHistory] = useState<any[]>([]);
 
+  // Persist last selected session in the browser.
   useEffect(() => {
-    // connect = start SSE stream
+    try {
+      const saved = localStorage.getItem('friday:lastSessionKey');
+      if (saved) setSelectedSession(saved);
+    } catch {
+      // ignore
+    }
+  }, []);
+
+  useEffect(() => {
+    try {
+      if (selectedSession) localStorage.setItem('friday:lastSessionKey', selectedSession);
+    } catch {
+      // ignore
+    }
+  }, [selectedSession]);
+
+  useEffect(() => {
+    // connected = start SSE stream
     let es: EventSource | null = null;
     if (connected) {
       es = new EventSource('/api/events');
@@ -34,21 +52,21 @@ export default function DashboardPage() {
         }
       });
       es.addEventListener('error', () => {
-        // SSE errors are common on deploys; keep last error in UI
-        setError('Live events stream error (check PROXY_BASE_URL/PROXY_TOKEN and proxy reachability)');
+        setError('Live events stream error (check proxy/Vercel env + reachability)');
       });
     }
     return () => {
-      try { es?.close(); } catch {}
+      try {
+        es?.close();
+      } catch {}
     };
   }, [connected]);
 
-  async function connect() {
+  async function autoConnectAndLoad() {
     setError(null);
     try {
-      // simple connectivity check
-      const r = await fetch('/api/sessions', { cache: 'no-store' });
-      if (!r.ok) throw new Error(await r.text());
+      // Load sessions to validate connectivity.
+      await loadSessions(true);
       setConnected(true);
     } catch (e: any) {
       setConnected(false);
@@ -56,50 +74,80 @@ export default function DashboardPage() {
     }
   }
 
-  async function loadSessions() {
-    setError(null);
-    try {
-      const r = await fetch('/api/sessions', { cache: 'no-store' });
-      if (!r.ok) {
-        const text = await r.text().catch(() => '');
-        throw new Error(text || `sessions failed: ${r.status}`);
-      }
-      const res = await r.json();
-      const list = res?.sessions ?? res;
-      if (!Array.isArray(list)) {
-        throw new Error(`Unexpected sessions payload (expected array): ${JSON.stringify(res).slice(0, 500)}`);
-      }
-      const rows: SessionRow[] = list.map((s: any) => ({
-        sessionKey: s.sessionKey ?? s.key ?? s.id,
-        label: s.label,
-        agentId: s.agentId,
-        kind: s.kind,
-        updatedAt: s.updatedAt,
-      }));
-      setSessions(rows);
-      if (!selectedSession && rows[0]?.sessionKey) setSelectedSession(rows[0].sessionKey);
-    } catch (e: any) {
-      setError(e?.message ?? String(e));
+  async function loadSessions(silent = false) {
+    if (!silent) setError(null);
+
+    const r = await fetch('/api/sessions', { cache: 'no-store' });
+    if (!r.ok) {
+      const text = await r.text().catch(() => '');
+      throw new Error(text || `sessions failed: ${r.status}`);
+    }
+    const res = await r.json();
+    const list = res?.sessions ?? res;
+    if (!Array.isArray(list)) {
+      throw new Error(`Unexpected sessions payload (expected array): ${JSON.stringify(res).slice(0, 500)}`);
+    }
+
+    const rows: SessionRow[] = list.map((s: any) => ({
+      sessionKey: s.sessionKey ?? s.key ?? s.id,
+      label: s.label,
+      agentId: s.agentId,
+      kind: s.kind,
+      updatedAt: s.updatedAt,
+    }));
+
+    setSessions(rows);
+
+    // Pick a session.
+    const stillExists = selectedSession && rows.some((x) => x.sessionKey === selectedSession);
+    const nextKey = stillExists ? selectedSession : rows[0]?.sessionKey || '';
+    if (nextKey) {
+      setSelectedSession(nextKey);
+      // Auto-load transcript
+      await loadHistory(nextKey);
     }
   }
 
   async function loadHistory(sessionKey: string) {
     setError(null);
-    try {
-      const r = await fetch(`/api/history?sessionKey=${encodeURIComponent(sessionKey)}`, { cache: 'no-store' });
-      if (!r.ok) {
-        const text = await r.text().catch(() => '');
-        throw new Error(text || `history failed: ${r.status}`);
-      }
-      const res = await r.json();
-      const msgs = res?.messages ?? res?.history ?? res;
-      if (!Array.isArray(msgs)) {
-        throw new Error(`Unexpected history payload (expected array): ${JSON.stringify(res).slice(0, 500)}`);
-      }
-      setHistory(msgs);
-    } catch (e: any) {
-      setError(e?.message ?? String(e));
+    const r = await fetch(`/api/history?sessionKey=${encodeURIComponent(sessionKey)}`, { cache: 'no-store' });
+    if (!r.ok) {
+      const text = await r.text().catch(() => '');
+      throw new Error(text || `history failed: ${r.status}`);
     }
+    const res = await r.json();
+    const msgs = res?.messages ?? res?.history ?? res;
+    if (!Array.isArray(msgs)) {
+      throw new Error(`Unexpected history payload (expected array): ${JSON.stringify(res).slice(0, 500)}`);
+    }
+    setHistory(msgs);
+  }
+
+  useEffect(() => {
+    // Auto-connect on page load.
+    autoConnectAndLoad();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  function normalizeText(m: any): string {
+    if (typeof m?.content === 'string') return m.content;
+    if (typeof m?.text === 'string') return m.text;
+    if (Array.isArray(m?.content)) {
+      return m.content
+        .map((p: any) => {
+          if (typeof p === 'string') return p;
+          if (p?.type === 'text' && typeof p?.text === 'string') return p.text;
+          if (p?.type === 'thinking' && typeof p?.thinking === 'string') return `[thinking]\n${p.thinking}`;
+          return JSON.stringify(p);
+        })
+        .join('\n');
+    }
+    return JSON.stringify(m, null, 2);
+  }
+
+  function isToolish(m: any): boolean {
+    const r = String(m?.role ?? '').toLowerCase();
+    return r.includes('tool');
   }
 
   return (
@@ -107,20 +155,20 @@ export default function DashboardPage() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-xl font-semibold">Dashboard</h1>
-          <p className="mt-1 text-sm text-zinc-400">Connected via server proxy</p>
+          <p className="mt-1 text-sm text-zinc-400">{connected ? 'Connected via server proxy' : 'Connecting…'}</p>
         </div>
         <div className="flex items-center gap-3">
           <Link href="/settings" className="text-sm text-zinc-300 underline">
             Settings
           </Link>
           <button
-            onClick={connect}
+            onClick={autoConnectAndLoad}
             className="rounded-lg bg-white px-4 py-2 text-sm font-medium text-zinc-900"
           >
-            {connected ? 'Re-connect' : 'Connect'}
+            Re-connect
           </button>
           <button
-            onClick={loadSessions}
+            onClick={() => loadSessions()}
             disabled={!connected}
             className="rounded-lg border border-zinc-700 px-4 py-2 text-sm font-medium disabled:opacity-50"
           >
@@ -187,13 +235,18 @@ export default function DashboardPage() {
                   <span>{m.role ?? m.type ?? 'msg'}</span>
                   <span>{m.ts ? new Date(m.ts).toLocaleString() : ''}</span>
                 </div>
-                <pre className="mt-2 whitespace-pre-wrap break-words text-sm text-zinc-200">
-                  {typeof m.content === 'string'
-                    ? m.content
-                    : typeof m.text === 'string'
-                      ? m.text
-                      : JSON.stringify(m, null, 2)}
-                </pre>
+                {isToolish(m) ? (
+                  <details className="mt-2">
+                    <summary className="cursor-pointer text-sm text-zinc-300">
+                      {m.toolName ? `Tool: ${m.toolName}` : 'Tool payload'} (click to expand)
+                    </summary>
+                    <pre className="mt-2 whitespace-pre-wrap break-words text-xs text-zinc-200">
+                      {normalizeText(m)}
+                    </pre>
+                  </details>
+                ) : (
+                  <pre className="mt-2 whitespace-pre-wrap break-words text-sm text-zinc-200">{normalizeText(m)}</pre>
+                )}
               </div>
             ))}
             {history.length === 0 ? (
