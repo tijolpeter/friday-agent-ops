@@ -54,9 +54,11 @@ export class GatewayClient {
 
     await new Promise<void>((resolve, reject) => {
       const onOpen = () => resolve();
-      const onError = (e: any) => reject(e);
+      const onError = () => reject(new Error('WebSocket error (check URL, TLS, and reachability)'));
+      const onClose = (e: CloseEvent) => reject(new Error(`WebSocket closed before connect (code=${e.code} reason=${e.reason || 'n/a'})`));
       ws.addEventListener('open', onOpen, { once: true });
       ws.addEventListener('error', onError, { once: true });
+      ws.addEventListener('close', onClose, { once: true });
     });
 
     // Wait for connect.challenge (the gateway sends it first)
@@ -72,7 +74,7 @@ export class GatewayClient {
           // ignore
         }
       };
-      const onClose = () => reject(new Error('socket closed before challenge'));
+      const onClose = (e: CloseEvent) => reject(new Error(`socket closed before challenge (code=${e.code} reason=${e.reason || 'n/a'})`));
       ws.addEventListener('message', onMessage);
       ws.addEventListener('close', onClose, { once: true });
     });
