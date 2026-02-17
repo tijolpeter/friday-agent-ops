@@ -30,7 +30,7 @@ export default function SettingsPage() {
           className="mt-2 w-full rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm"
           value={gatewayUrl}
           onChange={(e) => setGatewayUrl(e.target.value)}
-          placeholder="wss://your-magicdns/ (or ws://127.0.0.1:18789)"
+          placeholder="(legacy) wss://..."
         />
 
         <label className="mt-5 block text-sm font-medium">Gateway token (optional)</label>
@@ -38,7 +38,7 @@ export default function SettingsPage() {
           className="mt-2 w-full rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm"
           value={token}
           onChange={(e) => setToken(e.target.value)}
-          placeholder="paste token"
+          placeholder="(legacy)"
         />
 
         <div className="mt-6 flex items-center gap-3">

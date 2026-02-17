@@ -2,8 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
-import { GatewayClient, type RpcEvent } from '@/lib/gatewayClient';
-import { loadSettings } from '@/lib/storage';
+type RpcEvent = any;
 
 type SessionRow = {
   sessionKey: string;
@@ -14,7 +13,6 @@ type SessionRow = {
 };
 
 export default function DashboardPage() {
-  const clientRef = useRef<GatewayClient | null>(null);
   const [connected, setConnected] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [sessions, setSessions] = useState<SessionRow[]>([]);
@@ -22,29 +20,35 @@ export default function DashboardPage() {
   const [selectedSession, setSelectedSession] = useState<string>('');
   const [history, setHistory] = useState<any[]>([]);
 
-  const settings = useMemo(() => loadSettings(), []);
-
   useEffect(() => {
-    const c = new GatewayClient();
-    clientRef.current = c;
-
-    const off = c.onEvent((ev) => {
-      setEvents((prev) => [ev, ...prev].slice(0, 200));
-    });
-
+    // connect = start SSE stream
+    let es: EventSource | null = null;
+    if (connected) {
+      es = new EventSource('/api/events');
+      es.addEventListener('gw', (e: MessageEvent) => {
+        try {
+          const ev = JSON.parse(String((e as any).data));
+          setEvents((prev) => [ev, ...prev].slice(0, 200));
+        } catch {
+          // ignore
+        }
+      });
+      es.addEventListener('error', () => {
+        // SSE errors are common on deploys; keep last error in UI
+        setError('Live events stream error (check PROXY_BASE_URL/PROXY_TOKEN and proxy reachability)');
+      });
+    }
     return () => {
-      off();
-      c.close();
-      clientRef.current = null;
+      try { es?.close(); } catch {}
     };
-  }, []);
+  }, [connected]);
 
   async function connect() {
     setError(null);
     try {
-      const c = clientRef.current;
-      if (!c) throw new Error('client not ready');
-      await c.connect({ gatewayUrl: settings.gatewayUrl, token: settings.token });
+      // simple connectivity check
+      const r = await fetch('/api/sessions', { cache: 'no-store' });
+      if (!r.ok) throw new Error(await r.text());
       setConnected(true);
     } catch (e: any) {
       setConnected(false);
@@ -55,9 +59,7 @@ export default function DashboardPage() {
   async function loadSessions() {
     setError(null);
     try {
-      const c = clientRef.current;
-      if (!c) throw new Error('client not ready');
-      const res = await c.rpc<any>('sessions.list', { limit: 200 });
+      const res = await fetch('/api/sessions', { cache: 'no-store' }).then((r) => r.json());
       const rows: SessionRow[] = (res?.sessions ?? res ?? []).map((s: any) => ({
         sessionKey: s.sessionKey ?? s.key ?? s.id,
         label: s.label,
@@ -75,9 +77,7 @@ export default function DashboardPage() {
   async function loadHistory(sessionKey: string) {
     setError(null);
     try {
-      const c = clientRef.current;
-      if (!c) throw new Error('client not ready');
-      const res = await c.rpc<any>('chat.history', { sessionKey, limit: 200, includeTools: true });
+      const res = await fetch(`/api/history?sessionKey=${encodeURIComponent(sessionKey)}`, { cache: 'no-store' }).then((r) => r.json());
       const msgs = res?.messages ?? res?.history ?? res ?? [];
       setHistory(msgs);
     } catch (e: any) {
@@ -90,7 +90,7 @@ export default function DashboardPage() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-xl font-semibold">Dashboard</h1>
-          <p className="mt-1 text-sm text-zinc-400">Gateway: {settings.gatewayUrl}</p>
+          <p className="mt-1 text-sm text-zinc-400">Connected via server proxy</p>
         </div>
         <div className="flex items-center gap-3">
           <Link href="/settings" className="text-sm text-zinc-300 underline">
