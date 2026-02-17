@@ -204,11 +204,37 @@ const server = http.createServer(async (req, res) => {
 
       const cleanup = () => {
         clearInterval(heartbeat);
-        try { ws.close(); } catch {}
+        try {
+          ws.close();
+        } catch {}
       };
 
       req.on('close', cleanup);
       req.on('aborted', cleanup);
+      return;
+    }
+
+    if (url.pathname === '/nudge' && req.method === 'POST') {
+      let raw = '';
+      req.on('data', (c) => (raw += c));
+      req.on('end', async () => {
+        try {
+          const body = JSON.parse(raw || '{}');
+          const sessionKey = body.sessionKey;
+          const message = body.message;
+          if (!sessionKey || !message) return json(res, 400, { error: 'missing sessionKey/message' });
+
+          const ws = await connectGateway();
+          try {
+            const payload = await gatewayRpc(ws, 'chat.send', { sessionKey, message });
+            return json(res, 200, payload ?? { ok: true });
+          } finally {
+            ws.close();
+          }
+        } catch (e) {
+          return json(res, 500, { error: 'server_error', detail: String(e?.message ?? e) });
+        }
+      });
       return;
     }
 
