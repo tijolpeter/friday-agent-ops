@@ -50,10 +50,22 @@ export default function AgentDetailPage({ params }: { params: { agentId: string 
     const res = await r.json();
     const list = res?.sessions ?? res;
     if (!Array.isArray(list)) throw new Error('sessions payload unexpected');
-    setSessions(list);
+    const safe: SessionRow[] = list
+      .map((s: any) => ({
+        sessionKey: String(s?.sessionKey ?? s?.key ?? s?.id ?? ''),
+        agentId: s?.agentId,
+        kind: s?.kind,
+        updatedAt: s?.updatedAt,
+      }))
+      .filter((s: any) => s.sessionKey);
 
-    const preferred = list.find((s: any) => s.sessionKey === `agent:${agentId}:main`);
-    const pick = preferred ?? list.find((s: any) => s.agentId === agentId) ?? list.find((s: any) => String(s.sessionKey).includes(`:${agentId}:`));
+    setSessions(safe);
+
+    const preferred = safe.find((s: any) => s.sessionKey === `agent:${agentId}:main`);
+    const pick =
+      preferred ??
+      safe.find((s: any) => s.agentId === agentId) ??
+      safe.find((s: any) => String(s.sessionKey).includes(`:${agentId}:`));
     if (pick?.sessionKey) setSessionKey(pick.sessionKey);
   }
 

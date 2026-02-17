@@ -33,7 +33,22 @@ function statusFromUpdated(ts?: number) {
 }
 
 export default function AgentsPage() {
-  const agents = useMemo(() => getAgents(), []);
+  const [discovered, setDiscovered] = useState<{ agentId: string; name?: string }[]>([]);
+  const agents = useMemo(() => {
+    const cfg = getAgents();
+    const merged = new Map(cfg.map((a) => [a.agentId, a]));
+    for (const d of discovered) {
+      if (!d?.agentId) continue;
+      if (!merged.has(d.agentId)) merged.set(d.agentId, { agentId: d.agentId, name: d.name ?? d.agentId });
+    }
+    // Friday pinned by config (pin=true) remains on top.
+    return [...merged.values()].sort((a, b) => {
+      const ap = a.pin ? 0 : 1;
+      const bp = b.pin ? 0 : 1;
+      if (ap !== bp) return ap - bp;
+      return (a.name ?? a.agentId).localeCompare(b.name ?? b.agentId);
+    });
+  }, [discovered]);
   const [sessions, setSessions] = useState<SessionRow[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -42,11 +57,32 @@ export default function AgentsPage() {
     setError(null);
     setLoading(true);
     try {
-      const r = await fetch('/api/sessions', { cache: 'no-store' });
-      if (!r.ok) throw new Error(await r.text());
-      const res = await r.json();
-      const list = res?.sessions ?? res;
-      setSessions(Array.isArray(list) ? list : []);
+      const [sR, aR] = await Promise.all([
+        fetch('/api/sessions', { cache: 'no-store' }),
+        fetch('/api/agents', { cache: 'no-store' }),
+      ]);
+      if (!sR.ok) throw new Error(await sR.text());
+
+      const sJson = await sR.json();
+      const list = sJson?.sessions ?? sJson;
+      const safe = Array.isArray(list) ? list : [];
+      setSessions(
+        safe
+          .map((s: any) => ({
+            sessionKey: String(s?.sessionKey ?? s?.key ?? s?.id ?? ''),
+            agentId: s?.agentId,
+            kind: s?.kind,
+            updatedAt: s?.updatedAt,
+            displayName: s?.displayName,
+          }))
+          .filter((s: any) => s.sessionKey),
+      );
+
+      if (aR.ok) {
+        const aJson = await aR.json();
+        const agents = aJson?.agents;
+        if (Array.isArray(agents)) setDiscovered(agents);
+      }
     } catch (e: any) {
       setError(e?.message ?? String(e));
     } finally {
@@ -61,7 +97,11 @@ export default function AgentsPage() {
   function sessionFor(agentId: string) {
     // Prefer the canonical main session key if present.
     const preferred = sessions.find((s) => s.sessionKey === `agent:${agentId}:main`);
-    return preferred ?? sessions.find((s) => s.agentId === agentId) ?? sessions.find((s) => s.sessionKey.includes(`:${agentId}:`));
+    return (
+      preferred ??
+      sessions.find((s) => s.agentId === agentId) ??
+      sessions.find((s) => String((s as any)?.sessionKey ?? '').includes(`:${agentId}:`))
+    );
   }
 
   return (
