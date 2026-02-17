@@ -163,7 +163,8 @@ const server = http.createServer(async (req, res) => {
       if (!sessionKey) return json(res, 400, { error: 'missing sessionKey' });
       const ws = await connectGateway();
       try {
-        const payload = await gatewayRpc(ws, 'chat.history', { sessionKey, limit: 200, includeTools: true });
+        // Note: some gateway builds don't support includeTools on chat.history.
+        const payload = await gatewayRpc(ws, 'chat.history', { sessionKey, limit: 200 });
         return json(res, 200, payload);
       } finally {
         ws.close();
