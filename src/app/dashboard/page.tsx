@@ -59,8 +59,17 @@ export default function DashboardPage() {
   async function loadSessions() {
     setError(null);
     try {
-      const res = await fetch('/api/sessions', { cache: 'no-store' }).then((r) => r.json());
-      const rows: SessionRow[] = (res?.sessions ?? res ?? []).map((s: any) => ({
+      const r = await fetch('/api/sessions', { cache: 'no-store' });
+      if (!r.ok) {
+        const text = await r.text().catch(() => '');
+        throw new Error(text || `sessions failed: ${r.status}`);
+      }
+      const res = await r.json();
+      const list = res?.sessions ?? res;
+      if (!Array.isArray(list)) {
+        throw new Error(`Unexpected sessions payload (expected array): ${JSON.stringify(res).slice(0, 500)}`);
+      }
+      const rows: SessionRow[] = list.map((s: any) => ({
         sessionKey: s.sessionKey ?? s.key ?? s.id,
         label: s.label,
         agentId: s.agentId,
@@ -77,8 +86,16 @@ export default function DashboardPage() {
   async function loadHistory(sessionKey: string) {
     setError(null);
     try {
-      const res = await fetch(`/api/history?sessionKey=${encodeURIComponent(sessionKey)}`, { cache: 'no-store' }).then((r) => r.json());
-      const msgs = res?.messages ?? res?.history ?? res ?? [];
+      const r = await fetch(`/api/history?sessionKey=${encodeURIComponent(sessionKey)}`, { cache: 'no-store' });
+      if (!r.ok) {
+        const text = await r.text().catch(() => '');
+        throw new Error(text || `history failed: ${r.status}`);
+      }
+      const res = await r.json();
+      const msgs = res?.messages ?? res?.history ?? res;
+      if (!Array.isArray(msgs)) {
+        throw new Error(`Unexpected history payload (expected array): ${JSON.stringify(res).slice(0, 500)}`);
+      }
       setHistory(msgs);
     } catch (e: any) {
       setError(e?.message ?? String(e));
