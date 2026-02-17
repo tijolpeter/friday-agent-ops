@@ -74,7 +74,15 @@ async function connectGateway() {
     params: {
       minProtocol: 3,
       maxProtocol: 3,
-      client: { id: 'friday-agent-ops-proxy', version: '0.1.0', platform: 'node', mode: 'operator' },
+      // Use a schema-valid client identity.
+      // (The gateway validates client.id + client.mode against an allowlist.)
+      client: {
+        id: 'cli',
+        displayName: 'friday-proxy',
+        version: '0.1.0',
+        platform: 'node',
+        mode: 'cli',
+      },
       role: 'operator',
       scopes: ['operator.read', 'operator.write', 'operator.admin'],
       caps: [],
@@ -83,7 +91,8 @@ async function connectGateway() {
       auth: { token: GATEWAY_TOKEN },
       locale: 'en-US',
       userAgent: 'friday-agent-ops-proxy/0.1.0',
-      challenge: challenge?.payload,
+      // IMPORTANT: do NOT echo back connect.challenge payload here.
+      // Device signing is its own field (not implemented in this proxy).
     },
   };
 
